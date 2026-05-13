@@ -1,4 +1,6 @@
 import warnings
+from pathlib import Path
+
 warnings.filterwarnings('ignore')
 
 import duckdb
@@ -9,7 +11,7 @@ import matplotlib.patches as mpatches
 from sklearn.preprocessing import StandardScaler
 from hmmlearn.hmm import GaussianHMM
 
-DB_PATH = '/Users/lucaszelmanovits/Desktop/Quant/Research/Data/quant.db'
+DB_PATH = str(Path(__file__).resolve().parent / 'Data' / 'quant.db')
 
 # ── 1. Load & clean ──────────────────────────────────────────────────────────
 conn = duckdb.connect(DB_PATH)

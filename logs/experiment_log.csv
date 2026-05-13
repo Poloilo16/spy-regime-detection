@@ -1,0 +1,4 @@
+Experiment_ID,Timestamp,HMM_FEATURES,Lags,Alvo_Banda,CV_Janela,CV_max_train_size,Acurácia,Recall_Estável,F1_Weighted,Top_5_Features
+20260513_150600,2026-05-13 15:07:01,"log_return,vix","[1, 5]",0.075,Rolling,756,0.5215827338129496,0.028901734104046242,0.4994706904028187,"garch_var_lag1,log_return,log_return_lag1,vrp_lag5,garch_var"
+20260513_152418,2026-05-13 15:25:25,"log_return,vix","[1, 5]",0.075,Rolling,756,0.5215827338129496,0.028901734104046242,0.4994706904028187,"garch_var_lag1,log_return,log_return_lag1,vrp_lag5,garch_var"
+OPTUNA_BEST_20260513_154113,2026-05-13 15:41:13,"log_return,vix|n_states=3|HMM_REFIT=42","[1, 5]",0.075,Rolling,756,0.5330935251798561,0.046242774566473986,0.5113453651433595,"{""HMM_REFIT"": 42, ""N_HMM_STATES"": 3, ""XGB_LEARNING_RATE"": 0.05, ""XGB_MAX_DEPTH"": 5, ""XGB_N_ESTIMATORS"": 100}"
