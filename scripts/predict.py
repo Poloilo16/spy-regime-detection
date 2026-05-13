@@ -1,10 +1,14 @@
 import csv
 import os
+import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
 
 warnings.filterwarnings('ignore')
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / 'src'))
 
 import numpy as np
 import pandas as pd
@@ -25,7 +29,7 @@ from training import (
     walk_forward_cv_metrics,
 )
 
-_ROOT = Path(__file__).resolve().parent
+_ROOT = _REPO_ROOT
 DB_PATH = DEFAULT_DB_PATH
 
 N_HMM_STATES = 4

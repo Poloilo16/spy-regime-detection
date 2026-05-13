@@ -16,10 +16,9 @@ warnings.filterwarnings('ignore')
 
 import optuna
 import sys
-from pathlib import Path
-_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(_ROOT / 'src'))
-import training 
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / 'src'))
 
 from training import (
     DEFAULT_DB_PATH,
@@ -29,8 +28,6 @@ from training import (
     build_xy,
     walk_forward_cv_metrics,
 )
-
-_ROOT = Path(__file__).resolve().parent
 N_TRIALS = 50
 CV_MAX_TRAIN = 756
 XGB_PARAMS_BASE = dict(
@@ -121,7 +118,7 @@ def main():
         'Top_5_Features',
     ]
 
-    logs_dir = _ROOT / 'logs'
+    logs_dir = _REPO_ROOT / 'logs'
     os.makedirs(logs_dir, exist_ok=True)
     experiment_log_path = logs_dir / 'experiment_log.csv'
     write_header = not experiment_log_path.exists()

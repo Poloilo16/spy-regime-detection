@@ -3,7 +3,7 @@ import numpy as np
 import os
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent
+_ROOT = Path(__file__).resolve().parent.parent
 LOGS_DIR = _ROOT / 'logs'
 
 def run_backtest_blindado():

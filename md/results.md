@@ -1,100 +1,71 @@
-# Results — SPY Regime Prediction
+# Results — SPY Vol-Shock Pipeline (modular)
 
-**Run date:** 2026-05-12  
-**Data:** SPY 2016-06-02 → 2026-05-01 (2,475 rows)  
-**Model:** XGBoost classifier, walk-forward CV (5 splits)  
-**Labels:** `rv_21d` expanding-window quartiles  
-**Features:** 23 total — BASE + lags 1 & 5, `regime_lag1`, rolling HMM forward probabilities  
-
----
-
-## Regime Definitions
-
-| Regime | Label | Definition |
-|--------|-------|------------|
-| 0 | Low vol | `rv_21d` in bottom quartile of expanding history |
-| 1 | Normal | 25th–50th percentile |
-| 2 | Elevated | 50th–75th percentile |
-| 3 | Crisis | Top quartile |
-
-Distribution in sample: Low vol 258 / Normal 641 / Elevated 838 / Crisis 676
+**Last log sync:** 2026-05-13 (`logs/experiment_log.csv`)  
+**Data path:** `src/Data/quant.db` (via `training.DEFAULT_DB_PATH`)  
+**Model:** `XGBClassifier`, walk-forward CV (`TimeSeriesSplit`, rolling train `max_train_size=756` where configured)  
+**Labels (`target`):** 5d realized-vol **shock ratio** `fwd_rv / bwd_rv - 1` vs. bands `RV_SHOCK_LOW` / `RV_SHOCK_HIGH` (±0.075) → **0 Quéda**, **1 Estável**, **2 Alta**  
+**Features:** `BASE` + lags `[1,5]`, `regime_lag1` (expanding `rv_21d` quartiles), rolling HMM **`p_hmm*_tmrw`**
 
 ---
 
-## Walk-Forward CV Results
+## Target definitions (3-class)
 
-**Feature matrix:** 2,160 rows × 23 features (after lag/HMM warmup)
-
-| Fold | Test rows | Accuracy |
-|------|-----------|----------|
-| 1 | 360 | 75.3% |
-| 2 | 360 | 39.4% |
-| 3 | 360 | 80.0% |
-| 4 | 360 | 71.9% |
-| 5 | 360 | 78.9% |
-| **Overall** | **1,800** | **69.2%** |
-
-### Classification Report
-
-| Regime | Precision | Recall | F1 | Support |
-|--------|-----------|--------|----|---------|
-| 0-Low vol | 0.94 | 0.38 | 0.54 | 118 |
-| 1-Normal | 0.75 | 0.49 | 0.59 | 477 |
-| 2-Elevated | 0.67 | 0.67 | 0.67 | 698 |
-| 3-Crisis | 0.66 | 0.97 | 0.79 | 507 |
-| **Weighted avg** | **0.71** | **0.69** | **0.68** | **1,800** |
-
-### Confusion Matrix (rows = actual, cols = predicted)
-
-|  | Pred 0 | Pred 1 | Pred 2 | Pred 3 |
-|--|--------|--------|--------|--------|
-| **Actual 0** | 45 | 64 | 3 | 6 |
-| **Actual 1** | 2 | 234 | 211 | 30 |
-| **Actual 2** | 1 | 12 | 471 | 214 |
-| **Actual 3** | 0 | 0 | 13 | 494 |
+| Class | Name | Condition (vol shock ratio) |
+|-------|------|-------------------------------|
+| 0 | Queda | ratio < −0.075 |
+| 1 | Estável | within band |
+| 2 | Alta | ratio > +0.075 |
 
 ---
 
-## Feature Importances (Top 15)
+## Walk-forward reference — default `scripts/predict.py`
 
-| Feature | Importance |
-|---------|------------|
-| `regime_lag1` | 0.6273 |
-| `rv_21d` | 0.0894 |
-| `rv_21d_lag1` | 0.0249 |
-| `p_hmm3_tmrw` | 0.0225 |
-| `p_hmm0_tmrw` | 0.0195 |
-| `garch_var` | 0.0162 |
-| `p_hmm2_tmrw` | 0.0161 |
-| `garch_var_lag1` | 0.0158 |
-| `slope_2s10s` | 0.0143 |
-| `log_return` | 0.0141 |
-| `slope_2s10s_lag1` | 0.0136 |
-| `p_hmm1_tmrw` | 0.0136 |
-| `rv_21d_lag5` | 0.0129 |
-| `vix` | 0.0122 |
-| `vix_lag1` | 0.0116 |
+Hyperparameters (illustrative): `max_depth=4`, `n_estimators=300`, `HMM_REFIT=21`, `N_HMM_STATES=4`, etc. — see `scripts/predict.py`.
 
-Combined HMM importance (`p_hmm0–3_tmrw`): **~7.2%**
+**Logged runs (2026-05-13):** two identical executions reported **global accuracy ≈ 52.16%**, **Recall_Estável ≈ 0.029**, **F1 weighted ≈ 0.50** (class imbalance + balanced weights compress headline accuracy vs. legacy quartile-only reports).
+
+For historical comparison: earlier project snapshots using **different label definitions** (pure `rv_21d` quartile classification) reported **~69%** overall accuracy; **direct numeric comparison across label laws is invalid** — treat ~69% as a **different experiment**, not the same `target` row.
+
+---
+
+## Optuna — best logged trial (F1 **Estável** maximization)
+
+**Study objective:** maximize `f1_stable` from `walk_forward_cv_metrics` (F1 of class 1).
+
+**Best row (`OPTUNA_BEST_20260513_162138`):**
+
+| Metric | Value |
+|--------|--------|
+| **Global accuracy** | **0.4777 (~47.77%)** |
+| **Recall_Estável** | 0.1503 |
+| **F1 weighted** | 0.4828 |
+| `N_HMM_STATES` | 3 |
+| `HMM_REFIT` | 63 |
+| `XGB_MAX_DEPTH` | 3 |
+| `XGB_LEARNING_RATE` | 0.01 |
+| `XGB_N_ESTIMATORS` | 100 |
+
+**Takeaway:** pushing the optimizer to lift **Estável** forces a **shallower** booster and a **slower** HMM refresh cadence; **global accuracy falls** into the high-40s (%). This matches the qualitative diagnosis: **VIX / VRP are shock-aligned features**, not mean-reversion anchors.
+
+---
+
+## Explicability (SHAP)
+
+`scripts/predict.py` runs **`shap.TreeExplainer`** on the **last** feature row and prints the top-5 signed SHAP values for the **predicted** class — use this to validate that the model is not trivially collapsing to a single spurious driver on the live date.
 
 ---
 
 ## GARCH(1,1)
 
-| Metric | Value |
-|--------|-------|
-| AIC | 6,274.5 |
-| BIC | 6,297.7 |
+Rolling window fit (252 returns) through each **t**; conditional variance forecast at **t** feeds `garch_var` and lagged columns. Per-trial AIC/BIC are printed in verbose paths when enabled in scripts.
 
 ---
 
-## Next-Day Prediction (as of 2026-04-30)
+## Next steps for fresh numbers
 
-| | |
-|--|--|
-| Today's regime | 2 — Elevated |
-| **Predicted tomorrow** | **1 — Normal** |
-| R0 probability | 0.00 |
-| R1 probability | **0.90** |
-| R2 probability | 0.10 |
-| R3 probability | 0.00 |
+```bash
+python scripts/predict.py
+python scripts/optimize.py   # optional; long-running
+```
+
+Then re-open **`logs/experiment_log.csv`** and **`logs/preds_*.csv`** for the authoritative metrics row.

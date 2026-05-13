@@ -4,41 +4,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Quantitative research project for **market regime detection** on SPY. The pipeline collects time series data from Interactive Brokers and FRED, stores it in DuckDB, classifies volatility regimes via HMM, and predicts tomorrow's regime using GARCH + XGBoost.
+Quantitative research project for **market regime / volatility-shock detection** on SPY. The pipeline collects time series from Interactive Brokers and FRED, stores them in DuckDB, engineers features (GARCH, rolling HMM forward probabilities, macro), and predicts a **5-day realized-vol shock ratio** target with **XGBoost** under walk-forward validation. A separate **global HMM** branch (`src/main.py`) remains for exploratory visualization.
 
 ## Running the Code
 
 ```bash
-python main.py      # HMM regime detection → regime_plot.png
-python predict.py   # GARCH + XGBoost regime prediction
-jupyter notebook notebook.ipynb  # data collection pipeline
+python scripts/predict.py    # build_xy → walk-forward CV → final fit → SHAP → logs/
+python scripts/optimize.py   # Optuna (requires pip install optuna); appends best trial to logs/
+python scripts/backtest.py   # T+1 execution on latest preds_*.csv in logs/
+python src/main.py           # global HMM → regime_plot.png (descriptive only)
+jupyter notebook notebook.ipynb
 ```
 
-No build, lint, or test infrastructure — this is a research project.
+No formal lint/test harness — research-grade codebase with CSV experiment logging.
 
-## Architecture
+## Architecture (post-refactor)
 
-**Three-stage pipeline:**
+**Library module (`src/training.py`):** single source of truth for data fusion, labels, and models:
 
-1. **Data collection** (`notebook.ipynb`): Connects to Interactive Brokers (port 4001) to pull 10 years of SPY OHLCV and VIX data, fetches yield curve slope (10Y-2Y) from FRED, computes derived features (log returns, realized volatility windows, VRP, vol-of-vol), writes to DuckDB.
+- **`load_merged_df`**: SPY from `prices_daily`, macro series pivoted from `macro_daily`, then **`pd.merge_asof(..., direction='backward')`** on sorted dates (see Data Shielding below).
+- **`build_xy`**: orchestrates `add_regime` (expanding `rv_21d` quartiles), **`add_garch`**, **`add_hmm_forward_proba`** (rolling HMM + forward filter / refit cadence), **`add_target`** (5d vol-shock ratio → 3 classes), **`add_feature_matrix`** (BASE + lags + `regime_lag1` + `p_hmm*_tmrw`).
+- **`walk_forward_cv_metrics`**: `TimeSeriesSplit` (optional `max_train_size` for rolling train), balanced sample weights, returns concatenated OOF preds + `classification_report` dict.
 
-2. **HMM regime detection** (`main.py`): Reads from DuckDB, standardizes features, fits GaussianHMMs with 2–4 states, selects best model by BIC, generates Viterbi regime assignments + soft probabilities, reorders states by ascending `rv_21d` mean (state 0 = lowest vol), saves `regime_plot.png`.
+**Entry scripts (`scripts/`):** thin runners that import `training` and set script-level hyperparameters (XGBoost, `N_HMM_STATES`, `HMM_REFIT`, CV window).
 
-3. **Regime prediction** (`predict.py`): Labels regimes using `rv_21d` expanding-window quartiles (`MIN_WINDOW=63` days). Fits GARCH(1,1) for conditional variance. Runs a rolling HMM forward filter (`MIN_HMM=252`, refit every `HMM_REFIT=21` days) that produces four `p_hmmN_tmrw` features — P(state_T+1 | observations_0:T) — using the incremental Bayesian filter (predict via `transmat_`, update via diagonal emission probability) to avoid reprocessing the full window each day. Label switching is resolved at every refit by reordering states to ascending `rv_21d` mean. Trains an XGBoost classifier with walk-forward CV (5 splits). Outputs CV metrics, feature importances, and a next-day prediction with probabilities. `predict.py` takes ~60 seconds to run due to the rolling HMM loop.
+### Import path (`sys.path`)
 
-**Database** (`Data/quant.db` — DuckDB):
-- `prices_daily`: SPY OHLCV + `log_return`, `rv_5d`/`rv_21d`/`rv_63d`, `vol_of_vol`, `vol_term_structure`, `vrp`, `return_autocorr`
-- `macro_daily`: series_id keyed rows for `VIX` and `2S10S` (10Y-2Y spread)
+Python does not treat `src/` as a package root when you execute `python scripts/optimize.py` from the repo root. **`scripts/optimize.py`** therefore does:
 
-**Features fed to XGBoost (23 total):** `log_return`, `rv_21d`, `vix`, `vrp`, `slope_2s10s`, `garch_var` — each with lags 1 and 5 (`LAGS = [1, 5]`) — plus `regime_lag1` and four `p_hmmN_tmrw` columns. The HMM columns are not lagged (they already represent tomorrow's probabilities). Top features: `regime_lag1` (63%), `rv_21d` (9%), `p_hmm3_tmrw`/`p_hmm0_tmrw` (~2% each, combined HMM importance ~7%).
+```python
+_ROOT = Path(__file__).resolve().parent.parent  # repository root
+sys.path.append(str(_ROOT / 'src'))
+import training
+```
 
-**Key dependencies:** `duckdb`, `hmmlearn`, `arch` (GARCH), `xgboost`, `ib_insync`, `fredapi`, `scikit-learn`, `pandas`, `numpy`, `matplotlib`
+This appends the **`src`** directory to `sys.path` so `import training` resolves to **`src/training.py`** without an editable install. Other entrypoints should follow the same pattern (or set `PYTHONPATH=src`) so imports are deterministic from any working directory.
+
+**Database:** `DEFAULT_DB_PATH` in `training.py` points to `src/Data/quant.db` (path anchored on `Path(__file__).resolve().parent` inside `src/`). Override via `build_xy(db_path=...)`.
+
+**Features (illustrative):** `BASE` includes `log_return`, `rv_21d`, `vix`, `vrp`, `slope_2s10s`, `garch_var`, `amihud_liquidity`, `hy_oas`, `icsa` with `LAGS = [1, 5]`, plus `regime_lag1` and dynamic `p_hmm0_tmrw`…`p_hmm{N-1}_tmrw`.
+
+**Key dependencies:** `duckdb`, `hmmlearn`, `arch`, `xgboost`, `scikit-learn`, `pandas`, `numpy`, `matplotlib`; **`shap`** for TreeExplainer in `predict.py`; **`optuna`** for `optimize.py`; notebook stack: `ib_insync`, `fredapi`, `nest_asyncio`.
+
+## MLOps & Explicability
+
+- **`logs/experiment_log.csv`**: append-only CSV with unique **`Experiment_ID`** (timestamp or `OPTUNA_BEST_*`), HMM meta, CV settings, **accuracy**, **Recall_Estável**, **F1_Weighted**, top features / best-params JSON.
+- **`logs/preds_<Experiment_ID>.csv`**: walk-forward OOF predictions (dates, returns, actual vs predicted target) for diagnostics and **`scripts/backtest.py`**.
+- **`scripts/predict.py`**: after the final `XGBClassifier` fit, runs **`shap.TreeExplainer`** on the latest row and prints the top contributions to the **predicted** shock class — local explanation of the boosted tree ensemble.
+
+## Data Shielding (macro alignment)
+
+Legacy SQL `LEFT JOIN macro_daily ON p.date = m.date` equates **calendar dates** across mixed-frequency series and can silently attach **future-revised** or **stale** macro prints relative to the equity bar. In **`load_merged_df`**, both legs are sorted; macro is forward-filled only **up to** each SPY row’s timestamp; then **`merge_asof(direction='backward')`** attaches the **last macro observation known on or before** each SPY date. That removes same-calendar **lookahead** in daily SPY vs FRED-style macro alignment.
 
 ## Important Notes
 
-- Both `main.py` and `predict.py` hardcode the path to `Data/quant.db` — update `DB_PATH` if the database moves.
-- `predict.py` uses `rv_21d` expanding-window quartile labels — not VIX thresholds and not the HMM regimes from `main.py`. Using VIX both as the label definition and as a feature creates circularity (the model would just learn VIX autocorrelation); the expanding quartile approach forces genuine prediction of future realized volatility state.
-- XGBoost requires `libomp` on macOS: `brew install libomp`.
-- Data collection in the notebook requires an active Interactive Brokers TWS/Gateway session on port 4001 and a FRED API key.
-- The notebook uses `nest_asyncio` to patch the event loop for `ib_insync` in Jupyter.
-- Python environment is managed via conda (per `.vscode/settings.json`).
+- **`src/main.py`** still uses a SQL join for its simpler load path — it is **descriptive** only. The **predictive** path uses **`training.load_merged_df`**.
+- Target is **not** VIX-threshold labels: it is the **5d vol-shock ratio** banded into Queda / Estável / Alta — avoids using VIX as both label and dominant feature.
+- XGBoost on macOS may need `brew install libomp`.
+- IB + FRED data collection requires live gateway (e.g. port 4001) and API keys as in the notebook.
