@@ -15,6 +15,11 @@ from pathlib import Path
 warnings.filterwarnings('ignore')
 
 import optuna
+import sys
+from pathlib import Path
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.append(str(_ROOT / 'src'))
+import training 
 
 from training import (
     DEFAULT_DB_PATH,
