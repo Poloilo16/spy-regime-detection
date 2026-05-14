@@ -4,7 +4,7 @@ import pandas as pd
 from pathlib import Path
 
 # Ajuste automático do caminho para o seu ambiente Windows
-DB_PATH = str(Path(__file__).resolve().parent / 'Data' / 'quant.db')
+DB_PATH = str(Path(__file__).resolve().parent.parent / 'Data' / 'quant.db')
 
 print("Conectando ao banco de dados...")
 conn = duckdb.connect(DB_PATH)
