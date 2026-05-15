@@ -1,5 +1,4 @@
-import csv
-import os
+import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,11 @@ from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
 
+_PROJ = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJ / 'src'))
+
 import training
+from experiment_logging import append_metrics_row, save_params_json
 from training import (
     DEFAULT_DB_PATH,
     HMM_FEATURES,
@@ -25,7 +28,6 @@ from training import (
     walk_forward_cv_metrics,
 )
 
-_ROOT = Path(__file__).resolve().parent
 DB_PATH = DEFAULT_DB_PATH
 
 N_HMM_STATES = 4
@@ -116,9 +118,8 @@ def main():
         name = FEATURES[int(j)]
         print(f"  {rank}. {name}: {shap_last_class[j]:+.6f}")
 
-    logs_dir = _ROOT / 'logs'
-    os.makedirs(logs_dir, exist_ok=True)
-    experiment_log_path = logs_dir / 'experiment_log.csv'
+    logs_dir = _PROJ / 'logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
 
     report_dict = classification_report(
         all_true, all_preds,
@@ -129,35 +130,54 @@ def main():
     accuracy = float(report_dict['accuracy'])
     recall_estavel = float(report_dict[target_report_names[1]]['recall'])
     f1_weighted = float(report_dict['weighted avg']['f1-score'])
-    top5_features = ','.join(importance.nlargest(5).index.astype(str).tolist())
-    cv_max_train_str = '' if CV_MAX_TRAIN_SIZE is None else str(int(CV_MAX_TRAIN_SIZE))
+    f1_estavel = float(report_dict[target_report_names[1]]['f1-score'])
+    cv_max_train_str = (
+        '' if CV_MAX_TRAIN_SIZE is None else str(int(CV_MAX_TRAIN_SIZE))
+    )
 
-    log_row = [
-        EXP_ID,
-        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        ','.join(HMM_FEATURES),
-        str(LAGS),
-        float(RV_SHOCK_HIGH),
-        CV_JANELA,
-        cv_max_train_str,
-        accuracy,
-        recall_estavel,
-        f1_weighted,
-        top5_features,
-    ]
-    header = [
-        'Experiment_ID',
-        'Timestamp',
-        'HMM_FEATURES',
-        'Lags',
-        'Alvo_Banda',
-        'CV_Janela',
-        'CV_max_train_size',
-        'Acurácia',
-        'Recall_Estável',
-        'F1_Weighted',
-        'Top_5_Features',
-    ]
+    append_metrics_row({
+        'Experiment_ID': EXP_ID,
+        'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'Source': 'predict',
+        'Acurácia': accuracy,
+        'F1_Weighted': f1_weighted,
+        'F1_Estável': f1_estavel,
+        'Recall_Estável': recall_estavel,
+        'Alvo_Banda': float(RV_SHOCK_HIGH),
+        'CV_Janela': CV_JANELA,
+        'CV_max_train_size': cv_max_train_str,
+        'N_HMM_STATES': int(N_HMM_STATES),
+        'HMM_REFIT': int(HMM_REFIT),
+        'N_Samples': int(len(y)),
+        'N_Features': int(X.shape[1]),
+    })
+
+    save_params_json(EXP_ID, {
+        'source': 'predict',
+        'hmm_features': list(HMM_FEATURES),
+        'lags': list(LAGS),
+        'n_hmm_states': int(N_HMM_STATES),
+        'hmm_refit': int(HMM_REFIT),
+        'min_hmm': int(MIN_HMM),
+        'xgb_classifier_params': dict(XGB_PARAMS),
+        'rv_shock_high': float(RV_SHOCK_HIGH),
+        'cv_max_train_size': CV_MAX_TRAIN_SIZE,
+        'target_names': {str(k): v for k, v in TARGET_NAMES.items()},
+        'feature_list': list(FEATURES),
+        'top_15_importances': importance.nlargest(15).round(6).to_dict(),
+        'top_5_features': importance.nlargest(5).index.astype(str).tolist(),
+        'shap_top_predicted_class': [
+            {'feature': FEATURES[int(j)], 'shap': float(shap_last_class[j])}
+            for j in abs_order
+        ],
+        'latest_prediction': {
+            'date': str(latest_date),
+            'pred_class': int(pred_class),
+            'proba': {
+                TARGET_NAMES[i]: float(pred_proba[i]) for i in range(len(TARGET_NAMES))
+            },
+        },
+    })
 
     preds_wf_path = logs_dir / f'preds_{EXP_ID}.csv'
     preds_wf = pd.DataFrame(
@@ -169,13 +189,6 @@ def main():
         }
     )
     preds_wf.to_csv(preds_wf_path, index=False, encoding='utf-8')
-
-    write_header = not experiment_log_path.exists()
-    with open(experiment_log_path, 'a', newline='', encoding='utf-8') as f:
-        w = csv.writer(f)
-        if write_header:
-            w.writerow(header)
-        w.writerow(log_row)
 
 
 if __name__ == '__main__':

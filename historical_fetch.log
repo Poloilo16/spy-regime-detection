@@ -1,0 +1,43 @@
+2026-05-14 12:47:52,402 - INFO - sent startApi
+2026-05-14 12:47:52,403 - INFO - REQUEST startApi {}
+2026-05-14 12:47:52,403 - INFO - SENDING startApi b'\x00\x00\x00\n71\x002\x00101\x00\x00'
+2026-05-14 12:47:52,403 - INFO - ANSWER connectAck {}
+2026-05-14 12:47:52,405 - INFO - ANSWER managedAccounts {'accountsList': 'DUM722750'}
+2026-05-14 12:47:52,406 - INFO - nextValidId=1 (connected)
+2026-05-14 12:47:52,406 - INFO - ANSWER error {'reqId': -1, 'errorCode': 2104, 'errorString': 'A conexão do centro de dados de mercado está OK:usfarm'}
+2026-05-14 12:47:52,406 - ERROR - ERROR -1 2104 A conexão do centro de dados de mercado está OK:usfarm
+2026-05-14 12:47:52,406 - INFO - ANSWER error {'reqId': -1, 'errorCode': 2107, 'errorString': 'A conexão do centro de dados HMDS está inativa, mas deve ser disponibilizada sob demanda.ushmds'}
+2026-05-14 12:47:52,406 - ERROR - ERROR -1 2107 A conexão do centro de dados HMDS está inativa, mas deve ser disponibilizada sob demanda.ushmds
+2026-05-14 12:47:52,406 - INFO - ANSWER error {'reqId': -1, 'errorCode': 2158, 'errorString': 'A conexão do centro de dados Sec-def está ok:secdefil'}
+2026-05-14 12:47:52,408 - ERROR - ERROR -1 2158 A conexão do centro de dados Sec-def está ok:secdefil
+2026-05-14 12:47:52,419 - INFO - REQUEST reqHistoricalData {'reqId': 7001, 'contract': 2458256912752: 0,SPY,STK,,0.0,,,SMART,NASDAQ,USD,,,False,,combo:, 'endDateTime': '20260514 11:47:52 US/Eastern', 'durationStr': '5 D', 'barSizeSetting': '1 min', 'whatToShow': 'TRADES', 'useRTH': 0, 'formatDate': 2, 'keepUpToDate': False, 'chartOptions': []}
+2026-05-14 12:47:52,419 - INFO - SENDING reqHistoricalData b'\x00\x00\x00c20\x007001\x000\x00SPY\x00STK\x00\x000.0\x00\x00\x00SMART\x00NASDAQ\x00USD\x00\x00\x000\x0020260514 11:47:52 US/Eastern\x001 min\x005 D\x000\x00TRADES\x002\x000\x00\x00'
+2026-05-14 12:47:53,597 - INFO - ANSWER error {'reqId': -1, 'errorCode': 2106, 'errorString': 'A conexão do centro de dados HMDS está OK:ushmds'}
+2026-05-14 12:47:53,598 - ERROR - ERROR -1 2106 A conexão do centro de dados HMDS está OK:ushmds
+2026-05-14 12:47:54,462 - INFO - ANSWER error {'reqId': 7001, 'errorCode': 2176, 'errorString': 'Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 291.575 para 291'}
+2026-05-14 12:47:54,462 - ERROR - ERROR 7001 2176 Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 291.575 para 291
+2026-05-14 12:48:07,438 - INFO - Historical data for reqId 7001 ended. Start: 20260509  11:47:52, End: 20260514  11:47:52
+2026-05-14 12:48:07,789 - INFO - REQUEST reqHistoricalData {'reqId': 7002, 'contract': 2458256912752: 0,SPY,STK,,0.0,,,SMART,NASDAQ,USD,,,False,,combo:, 'endDateTime': '20260508 03:59:00 US/Eastern', 'durationStr': '5 D', 'barSizeSetting': '1 min', 'whatToShow': 'TRADES', 'useRTH': 0, 'formatDate': 2, 'keepUpToDate': False, 'chartOptions': []}
+2026-05-14 12:48:07,789 - INFO - SENDING reqHistoricalData b'\x00\x00\x00c20\x007002\x000\x00SPY\x00STK\x00\x000.0\x00\x00\x00SMART\x00NASDAQ\x00USD\x00\x00\x000\x0020260508 03:59:00 US/Eastern\x001 min\x005 D\x000\x00TRADES\x002\x000\x00\x00'
+2026-05-14 12:48:09,088 - INFO - ANSWER error {'reqId': 7002, 'errorCode': 2176, 'errorString': 'Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 369.6 para 369'}
+2026-05-14 12:48:09,088 - ERROR - ERROR 7002 2176 Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 369.6 para 369
+2026-05-14 12:48:23,439 - INFO - Historical data for reqId 7002 ended. Start: 20260503  03:59:00, End: 20260508  03:59:00
+2026-05-14 12:48:23,791 - INFO - REQUEST reqHistoricalData {'reqId': 7003, 'contract': 2458256912752: 0,SPY,STK,,0.0,,,SMART,NASDAQ,USD,,,False,,combo:, 'endDateTime': '20260501 03:59:00 US/Eastern', 'durationStr': '5 D', 'barSizeSetting': '1 min', 'whatToShow': 'TRADES', 'useRTH': 0, 'formatDate': 2, 'keepUpToDate': False, 'chartOptions': []}
+2026-05-14 12:48:23,791 - INFO - SENDING reqHistoricalData b'\x00\x00\x00c20\x007003\x000\x00SPY\x00STK\x00\x000.0\x00\x00\x00SMART\x00NASDAQ\x00USD\x00\x00\x000\x0020260501 03:59:00 US/Eastern\x001 min\x005 D\x000\x00TRADES\x002\x000\x00\x00'
+2026-05-14 12:48:24,816 - INFO - ANSWER error {'reqId': 7003, 'errorCode': 2176, 'errorString': 'Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 146.5 para 146'}
+2026-05-14 12:48:24,816 - ERROR - ERROR 7003 2176 Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 146.5 para 146
+2026-05-14 12:48:39,252 - INFO - Historical data for reqId 7003 ended. Start: 20260426  03:59:00, End: 20260501  03:59:00
+2026-05-14 12:48:39,603 - INFO - REQUEST reqHistoricalData {'reqId': 7004, 'contract': 2458256912752: 0,SPY,STK,,0.0,,,SMART,NASDAQ,USD,,,False,,combo:, 'endDateTime': '20260424 03:59:00 US/Eastern', 'durationStr': '5 D', 'barSizeSetting': '1 min', 'whatToShow': 'TRADES', 'useRTH': 0, 'formatDate': 2, 'keepUpToDate': False, 'chartOptions': []}
+2026-05-14 12:48:39,603 - INFO - SENDING reqHistoricalData b'\x00\x00\x00c20\x007004\x000\x00SPY\x00STK\x00\x000.0\x00\x00\x00SMART\x00NASDAQ\x00USD\x00\x00\x000\x0020260424 03:59:00 US/Eastern\x001 min\x005 D\x000\x00TRADES\x002\x000\x00\x00'
+2026-05-14 12:48:40,603 - INFO - ANSWER error {'reqId': 7004, 'errorCode': 2176, 'errorString': 'Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 9.75 para 9'}
+2026-05-14 12:48:40,603 - ERROR - ERROR 7004 2176 Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 9.75 para 9
+2026-05-14 12:48:55,026 - INFO - Historical data for reqId 7004 ended. Start: 20260419  03:59:00, End: 20260424  03:59:00
+2026-05-14 12:48:55,378 - INFO - REQUEST reqHistoricalData {'reqId': 7005, 'contract': 2458256912752: 0,SPY,STK,,0.0,,,SMART,NASDAQ,USD,,,False,,combo:, 'endDateTime': '20260417 03:59:00 US/Eastern', 'durationStr': '5 D', 'barSizeSetting': '1 min', 'whatToShow': 'TRADES', 'useRTH': 0, 'formatDate': 2, 'keepUpToDate': False, 'chartOptions': []}
+2026-05-14 12:48:55,378 - INFO - SENDING reqHistoricalData b'\x00\x00\x00c20\x007005\x000\x00SPY\x00STK\x00\x000.0\x00\x00\x00SMART\x00NASDAQ\x00USD\x00\x00\x000\x0020260417 03:59:00 US/Eastern\x001 min\x005 D\x000\x00TRADES\x002\x000\x00\x00'
+2026-05-14 12:48:56,324 - INFO - ANSWER error {'reqId': 7005, 'errorCode': 2176, 'errorString': 'Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 97.95 para 97'}
+2026-05-14 12:48:56,324 - ERROR - ERROR 7005 2176 Aviso: Sua versão da API não aceita regras de quantidade de ações fracionárias. Atualize para a versão mínima 163. Valor truncado 97.95 para 97
+2026-05-14 12:49:11,148 - INFO - Historical data for reqId 7005 ended. Start: 20260412  03:59:00, End: 20260417  03:59:00
+2026-05-14 12:49:11,157 - INFO - disconnecting
+2026-05-14 12:49:11,157 - INFO - ANSWER connectionClosed {}
+2026-05-14 12:49:11,157 - INFO - Disconnected from IB TWS/Gateway.
+2026-05-14 12:49:11,357 - INFO - Disconnected from IB TWS/Gateway.
