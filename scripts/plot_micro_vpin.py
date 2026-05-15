@@ -142,14 +142,15 @@ def main() -> None:
     common = cross_ts.intersection(price.index)
     marker_prices = price.reindex(common)
 
-    fig, (ax1, ax2) = plt.subplots(
-        2,
+    fig, (ax1, ax2, ax3) = plt.subplots(
+        3,
         1,
-        figsize=(12, 6),
+        figsize=(12, 8),
         sharex=True,
         constrained_layout=True,
-        gridspec_kw={"height_ratios": [2, 1]},
+        gridspec_kw={"height_ratios": [2, 1, 1]},
     )
+
 
     ax1.plot(price.index, price.values, color="black", lw=0.8, label=args.price)
     valid_m = marker_prices.notna()
@@ -185,14 +186,32 @@ def main() -> None:
         label=f"Toxicidade crítica ({TOXICITY_LEVEL})",
     )
     ax2.set_ylabel("VPIN")
-    ax2.set_xlabel("Tempo (UTC)")
+    ax2.set_ylabel("VPIN")
     ax2.legend(loc="upper left", fontsize=8)
     vmax = float(np.nanmax(vpin_df["vpin"].to_numpy(dtype=float)))
     if not np.isfinite(vmax):
         vmax = 1.0
     ax2.set_ylim(0.0, max(1.0, vmax * 1.05))
 
-    for ax in (ax1, ax2):
+    # --- NOVO PAINEL: TIB (Trade Imbalance) ---
+    ax3.plot(
+        vpin_df["bucket_end_ts"],
+        vpin_df["tib"],
+        color="purple",
+        lw=0.9,
+        label="TIB (Direção)",
+    )
+    ax3.axhline(0.0, color="black", ls="--", lw=0.8)
+    ax3.set_ylabel("TIB")
+    ax3.set_xlabel("Tempo (UTC)")
+    ax3.legend(loc="upper left", fontsize=8)
+    
+    tmax = float(np.nanmax(np.abs(vpin_df["tib"].to_numpy(dtype=float))))
+    if not np.isfinite(tmax):
+        tmax = 1.0
+    ax3.set_ylim(-max(1.0, tmax * 1.05), max(1.0, tmax * 1.05))
+
+    for ax in (ax1, ax2, ax3):
         ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
 
     out = args.out or (_PROJ / "logs" / "micro_vpin.png")

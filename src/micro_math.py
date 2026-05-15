@@ -162,7 +162,7 @@ def volume_buckets_from_bars(
                 buf_b = buf_s = 0.0
 
     if not rows:
-        cols = ["v_buy", "v_sell", "v_total", "abs_imbalance"]
+        cols = ["v_buy", "v_sell", "v_total", "abs_imbalance", "dir_imbalance"]
         if use_ts:
             cols.append("bucket_end_ts")
         return pd.DataFrame(columns=cols)
@@ -170,8 +170,9 @@ def volume_buckets_from_bars(
     arr = np.asarray(rows, dtype=float)
     buy_, sell_, tot_ = arr[:, 0], arr[:, 1], arr[:, 2]
     imb = np.abs(buy_ - sell_) / np.clip(tot_, 1e-12, None)
+    dir_imb = (buy_ - sell_) / np.clip(tot_, 1e-12, None)
     out = pd.DataFrame(
-        {"v_buy": buy_, "v_sell": sell_, "v_total": tot_, "abs_imbalance": imb}
+        {"v_buy": buy_, "v_sell": sell_, "v_total": tot_, "abs_imbalance": imb, "dir_imbalance": dir_imb}
     )
     if use_ts:
         out["bucket_end_ts"] = bucket_ts
@@ -189,6 +190,19 @@ def vpin_from_buckets(
         return pd.Series(dtype=float)
     x = bucket_df["abs_imbalance"].astype(float)
     return x.rolling(n_buckets, min_periods=1).mean()
+
+def tib_from_buckets(
+    bucket_df: pd.DataFrame,
+    n_buckets: int,
+) -> pd.Series:
+    """
+    TIB (Trade Imbalance): rolling mean of (V_buy - V_sell) / V_total over the last ``n_buckets`` buckets.
+    """
+    if bucket_df.empty or n_buckets < 1:
+        return pd.Series(dtype=float)
+    x = bucket_df["dir_imbalance"].astype(float)
+    return x.rolling(n_buckets, min_periods=1).mean()
+
 
 
 def compute_vpin_pipeline(
@@ -218,13 +232,15 @@ def compute_vpin_pipeline(
         vol, fb, fs, bucket_volume, bar_ts=ts_series,
     )
     if buckets.empty:
-        cols = ["v_buy", "v_sell", "v_total", "abs_imbalance", "vpin"]
+        cols = ["v_buy", "v_sell", "v_total", "abs_imbalance", "dir_imbalance", "vpin", "tib"]
         if ts_series is not None:
             cols.append("bucket_end_ts")
         return pd.DataFrame(columns=cols)
     vpin = vpin_from_buckets(buckets, vpin_window_buckets)
+    tib = tib_from_buckets(buckets, vpin_window_buckets)
     out = buckets.copy()
     out["vpin"] = vpin.to_numpy()
+    out["tib"] = tib.to_numpy()
     return out
 
 
