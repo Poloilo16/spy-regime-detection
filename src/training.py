@@ -21,7 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
 
-_ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = str(_ROOT / 'Data' / 'quant.db')
 
 LAGS = [1, 5]
@@ -37,8 +37,10 @@ HMM_FEATURES = ['log_return', 'vix']
 HMM_VOL_IDX = HMM_FEATURES.index('vix')
 MIN_HMM_DEFAULT = 756
 FORWARD_HORIZON = 5
-RV_SHOCK_LOW = -0.075
-RV_SHOCK_HIGH = 0.075
+RV_SHOCK_LOW = -0.15
+RV_SHOCK_HIGH = 0.15
+# Só acata Queda (0) ou Alta (2) se p da classe direcional > limiar; caso contrário força Estável (1).
+TRADE_CONFIDENCE_THRESHOLD = 0.65
 LOAD_REQUIRED = ['close', 'log_return', 'rv_21d', 'vrp', 'vix', 'slope_2s10s']
 
 XGB_PARAMS_BASE = dict(
@@ -248,6 +250,17 @@ def add_target(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def apply_trade_confidence_filter(preds: np.ndarray, proba: np.ndarray) -> np.ndarray:
+    """Converte previsões direcionais em Estável (1) quando a confiança na classe 0 ou 2 é baixa."""
+    preds = np.asarray(preds, dtype=int).ravel()
+    proba = np.asarray(proba, dtype=float)
+    out = preds.copy()
+    low_conf_down = (preds == 0) & (proba[:, 0] <= TRADE_CONFIDENCE_THRESHOLD)
+    low_conf_up = (preds == 2) & (proba[:, 2] <= TRADE_CONFIDENCE_THRESHOLD)
+    out[low_conf_down | low_conf_up] = 1
+    return out
+
+
 def add_feature_matrix(df: pd.DataFrame, hmm_cols: list[str]) -> tuple[pd.DataFrame, list[str], np.ndarray, np.ndarray]:
     df = df.copy()
     for col in BASE:
@@ -297,20 +310,30 @@ def walk_forward_cv_metrics(
     if max_train_size is not None:
         tscv_kw['max_train_size'] = max_train_size
     tscv = TimeSeriesSplit(**tscv_kw)
-    fold_preds, fold_true, fold_test_idx = [], [], []
+    fold_preds, fold_proba, fold_true, fold_test_idx = [], [], [], []
     for train_idx, test_idx in tscv.split(X):
         clf = XGBClassifier(**xgb_params)
         weights = compute_sample_weight(class_weight='balanced', y=y[train_idx])
         clf.fit(X[train_idx], y[train_idx], sample_weight=weights)
         preds = clf.predict(X[test_idx])
+        proba = clf.predict_proba(X[test_idx])
         fold_preds.append(preds)
+        fold_proba.append(proba)
         fold_true.append(y[test_idx])
         fold_test_idx.append(test_idx)
     all_preds = np.concatenate(fold_preds)
+    all_proba = np.vstack(fold_proba)
+    all_preds_trade = apply_trade_confidence_filter(all_preds, all_proba)
     all_true = np.concatenate(fold_true)
     cv_test_idx = np.concatenate(fold_test_idx)
     target_report_names = [f'{i}-{TARGET_NAMES[i]}' for i in range(3)]
     report_dict = classification_report(
+        all_true, all_preds_trade,
+        target_names=target_report_names,
+        zero_division=0,
+        output_dict=True,
+    )
+    report_dict_model = classification_report(
         all_true, all_preds,
         target_names=target_report_names,
         zero_division=0,
@@ -325,7 +348,10 @@ def walk_forward_cv_metrics(
         'accuracy': accuracy,
         'all_true': all_true,
         'all_preds': all_preds,
+        'all_preds_trade': all_preds_trade,
+        'all_proba': all_proba,
         'cv_test_idx': cv_test_idx,
         'report_dict': report_dict,
+        'report_dict_model': report_dict_model,
         'target_report_names': target_report_names,
     }

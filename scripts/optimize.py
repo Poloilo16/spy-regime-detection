@@ -14,6 +14,13 @@ from pathlib import Path
 warnings.filterwarnings('ignore')
 
 import optuna
+<<<<<<< HEAD
+import sys
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / 'src'))
+=======
+>>>>>>> develop
 
 _PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJ / 'src'))
@@ -110,6 +117,18 @@ def main():
         'Optuna_Best_F1_Estável': float(study.best_value),
     })
 
+<<<<<<< HEAD
+    logs_dir = _REPO_ROOT / 'logs'
+    os.makedirs(logs_dir, exist_ok=True)
+    experiment_log_path = logs_dir / 'experiment_log.csv'
+    write_header = not experiment_log_path.exists()
+    with open(experiment_log_path, 'a', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        if write_header:
+            w.writerow(header)
+        w.writerow(log_row)
+    print(f"\nLinha Optuna gravada em: {experiment_log_path}")
+=======
     save_params_json(log_id, {
         'run': 'optuna_best_refit',
         'hmm_features': list(HMM_FEATURES),
@@ -125,6 +144,7 @@ def main():
     })
     print(f"\nMétricas: {_PROJ / 'logs' / 'metrics_log.csv'}")
     print(f"Parâmetros: {_PROJ / 'logs' / 'params' / (log_id + '_params.json')}")
+>>>>>>> develop
 
 
 if __name__ == '__main__':

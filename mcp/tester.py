@@ -68,6 +68,15 @@ def bootstrap_test(
     sig_vals = sig.to_numpy()
     mkt_vals = mkt.to_numpy()
     k = len(sig_vals)
+<<<<<<< HEAD
+    boot_scores = np.empty(n_bootstraps, dtype=float)
+    for i in range(n_bootstraps):
+        rnd = np.random.choice(sig_vals, size=k, replace=True)
+        boot_ret = pd.Series(rnd * mkt_vals, index=aligned.index)
+        boot_scores[i] = _compute_metrics(boot_ret)[metric]
+        if not np.isfinite(boot_scores[i]):
+            boot_scores[i] = -np.inf
+=======
     # Sample all bootstraps at once to avoid per-iteration pd.Series construction.
     all_samples = np.random.choice(sig_vals, size=(n_bootstraps, k), replace=True)
     all_rets = all_samples * mkt_vals  # (n_bootstraps, k)
@@ -85,6 +94,7 @@ def bootstrap_test(
             (wealth > 0) & (years > 0), wealth ** (1.0 / years) - 1.0, np.nan,
         )
     boot_scores = np.where(np.isfinite(boot_scores), boot_scores, -np.inf)
+>>>>>>> develop
 
     pvalue = float(np.mean(boot_scores >= real_score))
     return {'real': real_score, 'pvalue': pvalue}

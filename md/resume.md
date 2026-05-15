@@ -1,220 +1,140 @@
 # Resumo do projeto — lógica ficheiro a ficheiro e ligações
 
-Este documento descreve, ponto a ponto, o que cada componente faz e como o pipeline **coleta dados → DuckDB → análise (HMM) → predição (GARCH + HMM + XGBoost)** se encadeia.
+Este documento descreve o pipeline **coleta → DuckDB → `src/training.py` (build_xy, HMM, GARCH) → scripts (`predict`, `optimize`, `backtest`)** após a modularização MLOps.
 
 ---
 
 ## 1. Visão geral do fluxo
 
-1. **`notebook.ipynb`** (e, em parte, **`update_db.py`**) alimentam o ficheiro **`Data/quant.db`** (DuckDB): tabelas `prices_daily` e `macro_daily`.
-2. **`main.py`** lê a mesma base, ajusta um **HMM em toda a série** (exploração / visualização) e grava **`regime_plot.png`**. Não grava regimes na base; é um ramo **descritivo**.
-3. **`predict.py`** lê a mesma base, constrói **rótulos e features** (incluindo GARCH rolling, HMM rolling e XGBoost), avalia com **walk-forward CV** e imprime a **predição** para o último dia disponível. É o ramo **predítivo**.
+1. **`notebook.ipynb`** e **`scripts/update_db.py`** alimentam **`src/Data/quant.db`** (DuckDB): `prices_daily`, `macro_daily`.
+2. **`src/training.py`** concentra toda a lógica preditiva partilhada: fusão temporal à prova de *lookahead*, etiquetas de regime (`rv_21d` expansivo), GARCH rolling, HMM com filtro *forward*, alvo de **choque de vol a 5 dias**, matriz de features e walk-forward CV.
+3. **`scripts/predict.py`** — importa `training`, corre `build_xy`, validação temporal, modelo final, **SHAP (`TreeExplainer`)**, regista **`logs/experiment_log.csv`** e **`logs/preds_<id>.csv`**.
+4. **`scripts/optimize.py`** — Optuna sobre hiperparâmetros (XGB + `N_HMM_STATES` + `HMM_REFIT`); acrescenta linha `OPTUNA_BEST_*` ao mesmo CSV de experiências.
+5. **`scripts/backtest.py`** — lê o último `preds_*.csv`, aplica sinal em **T+1** sobre `log_return`, custos de transação, imprime Sharpe / drawdown.
+6. **`src/main.py`** — ramo **descritivo**: HMM global em toda a série, `regime_plot.png`; **não** alimenta o XGBoost.
 
 ```
-[IB + FRED + SQL no notebook]     [update_db.py: FRED + Amihud + macro]
-              \                              /
-               v                            v
-                    Data/quant.db
-                    /           \
-                   v             v
-              main.py       predict.py
-           (HMM global)    (GARCH + HMM + XGB)
-                |                 |
-         regime_plot.png     stdout (métricas + próximo choque)
+[notebook + update_db]  →  src/Data/quant.db
+                              │
+                    ┌─────────┴─────────┐
+                    v                   v
+            src/training.py      src/main.py
+            (build_xy, WF)        (HMM global, PNG)
+                    │
+        ┌───────────┼───────────┐
+        v           v           v
+  predict.py   optimize.py  backtest.py
 ```
 
 ---
 
-## 2. Base de dados DuckDB (`Data/quant.db`)
+## 2. Resolução de imports: `sys.path.append`
 
-### 2.1. `prices_daily`
+Os *entry points* em **`scripts/`** não estão dentro do pacote `src`. Em **`scripts/optimize.py`** usa-se:
 
-- Uma linha por **(date, ticker)**; o SPY é o ativo central.
-- Colunas típicas (consoante o notebook e updates): OHLCV, **`log_return`**, volatilidades realizadas **`rv_*`**, **`vrp`**, derivadas de vol (**`vol_of_vol`**, etc., conforme células do notebook), **`amihud_liquidity`** (pode ser calculada no notebook e/ou em `update_db.py`).
+```python
+_ROOT = Path(__file__).resolve().parent.parent  # raiz do repositório
+sys.path.append(str(_ROOT / 'src'))
+import training
+```
 
-### 2.2. `macro_daily`
-
-- Chave lógica: **`(date, series_id, value)`**.
-- **`series_id`** usados no projeto incluem, entre outros: **`VIX`**, **`2S10S`** (inclinação da curva 10Y−2Y), **`HY_OAS`**, **`ICSA`** (pedidos iniciais de desemprego), conforme o notebook e `update_db.py` populam.
-
-Os scripts Python resolvem o caminho com **`Path(__file__).parent / 'Data' / 'quant.db'`**, para funcionar em qualquer máquina desde que a pasta `Data/` exista ao lado dos `.py`.
+Isto acrescenta **`src`** ao `sys.path`, permitindo `import training` → ficheiro **`src/training.py`** sem `pip install -e .`. **Recomendação:** replicar o mesmo padrão em qualquer script que importe `training` (ou exportar `PYTHONPATH=src`) para que `python scripts/...` funcione a partir de qualquer diretório de trabalho.
 
 ---
 
-## 3. `notebook.ipynb` — coleta e engenharia no DuckDB
+## 3. Blindagem de dados: `merge_asof` em vez de `JOIN` na carga preditiva
 
-### 3.1. Arranque assíncrono
+No ramo preditivo, **`load_merged_df`** em `training.py`:
 
-- **`nest_asyncio`**: necessário para correr **`ib_insync`** dentro do Jupyter sem conflitos de *event loop*.
+1. Carrega SPY (`prices_daily`) e macro em formato largo, **ordenado por `date`** (`kind='mergesort'` onde aplicável).
+2. Faz *forward-fill* só na série macro **antes** do *as-of join* (informação publicada até aquela data, não do futuro).
+3. Une com **`pd.merge_asof(df_spy, macro_wide, on='date', direction='backward')`**.
 
-### 3.2. Interactive Brokers (`ib_insync`)
+Com **`direction='backward'`**, cada barra diária do SPY recebe **a última observação macro cuja data é ≤ à data do SPY**. Isto corrige o risco do **`LEFT JOIN ... ON p.date = m.date`**: em calendários mistos (FRED com revisões, *lags* de divulgação, buracos), o *join* por igualdade de data pode alinhar um valor que **ainda não existia** no instante de decisão ou ignorar a ordem temporal real. O *merge asof* **backward** implementa a mesma disciplina que um trader teria ao olhar só para dados **já disponíveis** até ao fecho do dia de referência — eliminando *lookahead bias* de alinhamento na fronteira SPY vs macro.
 
-- Ligação ao TWS/Gateway (porta habitual do projeto: **4001**).
-- Pedido de histórico do **SPY**; construção de `log_return` e escrita em **`prices_daily`** (inserção de linhas novas relativamente ao que já existe na tabela).
-- Semelhante para o **VIX** como índice (CBOE), gravado em **`macro_daily`** com `series_id = 'VIX'`.
-
-### 3.3. SQL sobre `prices_daily`
-
-- Criação/alteração da tabela: colunas de **RV** em janelas (ex.: `rv_5d`, `rv_21d`, `rv_63d`) via `UPDATE` com subqueries de somas de quadrados de retornos.
-- Features derivadas (ex.: **`vol_of_vol`**, **`vol_term_structure`**, **`vrp`**, **`return_autocorr`**) através de `JOIN` com `macro_daily` (VIX) e lógica SQL no `UPDATE`.
-- Pode existir célula para **Amihud** (`|retorno|/volume`, escalado) em `prices_daily` — hoje também há caminho em **`update_db.py`**.
-
-### 3.4. FRED (`fredapi`)
-
-- Séries macro (ex.: **10Y−2Y** como `2S10S`) descarregadas e inseridas em **`macro_daily`** com `INSERT OR IGNORE`.
-
-### 3.5. Papel na cadeia
-
-- O notebook é a **fonte primária** de dados de mercado (IB) e parte do macro; tudo converge para **`quant.db`**, que **`main.py`** e **`predict.py`** assumem já coerente e alinhado por `date`.
+> **Nota:** `src/main.py` mantém um `SELECT` com `JOIN` clássico para visualização rápida; o pipeline **numérico** que alimenta XGBoost deve usar sempre **`training.load_merged_df`**.
 
 ---
 
-## 4. `update_db.py` — atualização auxiliar da base
+## 4. Base de dados DuckDB (`src/Data/quant.db`)
 
-### 4.1. Ligação
+### 4.1. `prices_daily`
 
-- Abre o mesmo **`Data/quant.db`** com caminho relativo ao script.
+Uma linha por **(date, ticker)**; SPY como ativo central. Colunas típicas: OHLCV, `log_return`, `rv_*`, `vrp`, `amihud_liquidity`, etc.
 
-### 4.2. Amihud
+### 4.2. `macro_daily`
 
-- Garante coluna **`amihud_liquidity`** em `prices_daily`.
-- `UPDATE` com subquery: **`|log_return| / NULLIF(volume,0) * 1e6`** por `(date, ticker)`.
-
-### 4.3. Macro FRED
-
-- Usa **`fredapi.Fred`** para séries **`HY_OAS`** (`BAMLH0A0HYM2`) e **`ICSA`** (`ICSA`), desde uma data inicial fixa.
-- Converte para `DataFrame` de linhas `(date, series_id, value)` e faz **`INSERT OR IGNORE`** em **`macro_daily`**.
-
-### 4.4. Papel na cadeia
-
-- Complementa o notebook: **não substitui** o IB; **atualiza** features macro e liquidez que **`predict.py`** já tenta ler (`hy_oas`, `icsa`, `amihud_liquidity`).
-- **Nota de segurança**: a chave FRED está no código; o ideal é migrar para variável de ambiente (como no notebook) para não expor credenciais.
+Chave lógica **`(date, series_id, value)`**. Exemplos: `VIX`, `2S10S`, `HY_OAS`, `ICSA`.
 
 ---
 
-## 5. `main.py` — HMM global e gráfico (análise)
+## 5. `src/training.py` — núcleo
 
-### 5.1. Carga
-
-- `SELECT` de SPY em **`prices_daily`** com `LEFT JOIN` a **`macro_daily`** para **VIX** e **2S10S** (`slope_2s10s`).
-- Remove linhas com `NA` nas colunas carregadas.
-
-### 5.2. Features do HMM
-
-- Lista fixa: **`log_return`**, **`rv_21d`**, **`vix`**, **`vrp`**, **`slope_2s10s`**.
-- **StandardScaler** em toda a série (fit = série completa).
-
-### 5.3. Seleção de modelo
-
-- Ajusta **GaussianHMM** com **2, 3 e 4 estados**, `covariance_type='full'`, muitas iterações.
-- Calcula **BIC** manualmente (contagem de parâmetros + log-verosimilhança) e escolhe o **número de estados** com menor BIC.
-
-### 5.4. Regimes e ordem dos estados
-
-- **Viterbi** (`predict`) para sequência de estados; **`predict_proba`** para probabilidades suavizadas.
-- **Reordenação**: estado **0** = menor média de **`rv_21d`** (dentro dos pontos classificados naquele estado), para interpretação “baixa → alta vol”.
-
-### 5.5. Saída
-
-- Estatísticas por `regime`.
-- Figura com preço **SPY** e sombras por regime + painel de probabilidades → **`regime_plot.png`**.
-
-### 5.6. Relação com `predict.py`
-
-- **Independente**: o HMM aqui é **um único fit** em toda a história; em **`predict.py`** o HMM é **rolling + filtro forward** e usa **outro conjunto de observações** (só `log_return` e `vix`). Os “regimes” do `main.py` **não** são os rótulos do XGBoost.
+- **`load_merged_df`**: fusão SPY + macro com `merge_asof`.
+- **`add_regime`**: quartis expansivos de `rv_21d` (`MIN_WINDOW=63`) → classes 0–3 (nomes Low … Crisis); usado como **`regime_lag1`** nas features.
+- **`add_garch`**: GARCH(1,1) em janela rolling de 252 dias até **t**, variância condicional a um passo em **t**.
+- **`add_hmm_forward_proba`**: HMM Gaussiano com `covariance_type='full'` em observações `HMM_FEATURES` (p.ex. `log_return`, `vix`); refit a cada **`hmm_refit`** dias; entre refits, passo de predição + atualização Bayesiana; **P(estado amanhã | dados até t)** → colunas `p_hmm*_tmrw` (reordenadas por média de VIX in-sample no refit).
+- **`add_target`**: razão de choque de RV 5d → classes 0/1/2.
+- **`build_xy`**: encadeia tudo e devolve `df`, lista de features, `X`, `y`.
+- **`walk_forward_cv_metrics`**: `TimeSeriesSplit`, pesos balanceados por *fold*, métricas e preds OOF.
 
 ---
 
-## 6. `predict.py` — pipeline preditivo completo
+## 6. `scripts/predict.py`
 
-### 6.1. Carga e limpeza
-
-- `SELECT` mais largo: preços + **`amihud_liquidity`** + macro agregado por `CASE`: **VIX**, **2S10S**, **HY_OAS**, **ICSA**.
-- Ordenação por `date`.
-- **`hy_oas`** e **`icsa`**: `ffill` e `bfill` para buracos; **`icsa`** ainda pode ser preenchido com **0** se tudo for nulo (ex.: alinhamento de calendário).
-- Comentário no código fala em colunas “core”; na prática o script faz **`dropna()`** sobre o `DataFrame` inteiro após estes passos — ou seja, **qualquer `NA` restante** nas colunas presentes elimina a linha (importante para séries que comecem mais tarde).
-
-### 6.2. Feature categórica `regime` (não é o alvo do XGBoost)
-
-- Percentil **expanding** de **`rv_21d`** com `MIN_WINDOW = 63` dias.
-- `pd.cut` em quartis → classes **0–3** (`REGIME_NAMES`: Low vol … Crisis).
-- Serve como **`regime_lag1`** (com `shift(1)`) nas features do classificador — **persistência do quartil de vol realizada**.
-
-### 6.3. `garch_var` — GARCH(1,1) rolling
-
-- Para cada índice `t` a partir de **`MIN_GARCH - 1`**: janela de **252** retornos até `t` (escalados ×100), ajusta **GARCH(1,1)**, prevê **variância a 1 passo** e grava em **`garch_var[t]`**.
-- Objetivo: **sem *lookahead*** no parâmetro da volatilidade condicional (o fit não usa retornos futuros).
-
-### 6.4. HMM rolling e colunas `p_hmm*_tmrw`
-
-- Observações do HMM: apenas **`log_return`** e **`vix`**, padronizadas.
-- A partir de **`MIN_HMM = 756`** dias: a cada **`HMM_REFIT = 21`** dias, **refita** o HMM (4 estados, **`covariance_type='full'`**) em **todos** os dados `0…t`.
-- Entre refits: **passo de filtro** — predição com **`transmat_`**, atualização com densidade **Gaussiana multivariada** completa (`_emission_full`, com `eps` na diagonal para estabilidade).
-- Ordenação dos estados por **média de VIX** in-sample (estado mais “calmo” em medo = índice menor após reorder).
-- Em cada `t`: guarda **P(estado amanhã | dados até t)** → **`p_hmm0_tmrw` … `p_hmm3_tmrw`** (já reordenadas). Estas colunas **não** recebem lag extra no *feature matrix* (já são “amanhã” condicional a informação até `t`).
-
-### 6.5. Alvo `target` — choque de vol em 5 dias
-
-- **`FORWARD_HORIZON = 5`**.
-- RV “para trás” 5d e RV “para a frente” 5d (somas de quadrados de `log_return`, anualizadas com fator `252/5`).
-- **`vol_shock_ratio = fwd_rv / bwd_rv - 1`**.
-- Limiares **`RV_SHOCK_LOW`** / **`RV_SHOCK_HIGH`** (atualmente **±0.075**): abaixo → classe **0 (Queda)**, acima → **2 (Alta)**, meio → **1 (Estável)**. Onde o rácio é inválido, `target` é `NaN` e a linha cai no `dropna` final.
-
-### 6.6. Lista `BASE` e *lags*
-
-- **`BASE`**: `log_return`, `rv_21d`, `vix`, `vrp`, `slope_2s10s`, `garch_var`, `amihud_liquidity`, `hy_oas`, `icsa`.
-- Para cada coluna em `BASE`, cria **`_lag1`** e **`_lag5`**.
-- Features finais: **todas as colunas base e lags** + **`regime_lag1`** + **`HMM_COLS`**.
-
-### 6.7. XGBoost e validação
-
-- **`XGBClassifier`** com hiperparâmetros fixos (`mlogloss`, profundidade limitada, *subsample*, etc.).
-- **`TimeSeriesSplit(n_splits=5)`**: validação **walk-forward** no tempo.
-- **`compute_sample_weight(..., class_weight='balanced')`** no treino (por *fold* e no modelo final) para mitigar desequilíbrio entre Queda / Estável / Alta.
-- Relatório de classificação e matriz de confusão sobre predições concatenadas dos testes.
-- Modelo **final** treinado em **todo** o `X,y` com os mesmos pesos.
-
-### 6.8. Predição no último dia
-
-- Usa a **última linha** de `df` após `dropna` para `predict_proba`.
-- Imprime: data, **regime de ontem** (quartil `rv_21d` via `regime_lag1`), classe prevista do **choque de vol** e probabilidades das três classes.
-
-### 6.9. Relação com `main.py` e com o notebook
-
-- Usa **as mesmas tabelas** que o notebook alimenta; **não** consome o PNG nem os regimes do `main.py`.
-- Depende de colunas opcionais (**`hy_oas`**, **`icsa`**, **`amihud_liquidity`**) estarem preenchidas ou tratadas por `ffill`/`bfill`; caso contrário, `dropna` reduz a amostra.
+- Chama `build_xy(DB_PATH, N_HMM_STATES, HMM_REFIT, ...)`.
+- Walk-forward + relatório + matriz de confusão.
+- Treino final em todo o `X,y`.
+- **SHAP:** `TreeExplainer` sobre a última linha; imprime top 5 impactos na classe prevista.
+- **Logging:** `Experiment_ID` temporal; append a **`logs/experiment_log.csv`**; grava **`logs/preds_<Experiment_ID>.csv`** com datas e alvos para *backtest*.
 
 ---
 
-## 7. Ficheiros de documentação / notas
+## 7. `scripts/optimize.py`
 
-| Ficheiro    | Função |
-|------------|--------|
-| **`CLAUDE.md`** | Guia rápido para quem desenvolve: comandos, arquitetura, dependências (pode estar ligeiramente desatualizado face ao `predict.py` atual — convém alinhar após mudanças). |
-| **`notes.md`** / **`results.md`** | Notas ou resultados em texto; não fazem parte do pipeline executável. |
+- Optuna: objetivo = **maximizar F1 da classe Estável (1)** (`f1_stable` retornado por `walk_forward_cv_metrics`).
+- O estudo mostrou trade-off forte: melhor trial logado (**`HMM_REFIT=63`**, **`max_depth=3`**, **`N_HMM_STATES=3`**) com **acurácia global ~47.7%** vs. configurações mais “ricas” que historicamente atingiam **~69%** de acurácia em configurações orientadas à precisão global (e vs. ~52% em corridas recentes do mesmo alvo de choque — ver CSV). Conclusão: **VIX/VRP são *shock hunters***; não trazem assinatura limpa de **mean-reversion** para a classe estável.
 
 ---
 
-## 8. Ordem sugerida de trabalho no dia a dia
+## 8. `scripts/backtest.py`
 
-1. Garantir **TWS/Gateway** (se for usar IB) e **FRED** com chave válida.
-2. Correr células relevantes do **`notebook.ipynb`** para atualizar **SPY**, **VIX**, curva, RV, VRP, etc.
-3. Opcional: **`python update_db.py`** para **HY_OAS**, **ICSA** e recalcular **Amihud** de forma consistente.
-4. Opcional: **`python main.py`** para inspeção visual dos regimes HMM “globais”.
-5. **`python predict.py`** para métricas out-of-sample (no esquema walk-forward) e predição do próximo choque de vol.
+- Usa o ficheiro `preds_` mais recente em **`logs/`**.
+- **`next_day_ret = log_return.shift(-1)`** — sinal em **T** só afeta retorno **T+1** (*lookahead* de execução evitado).
+- Custos proporcionais a mudanças de posição.
 
 ---
 
-## 9. Resumo das ligações (uma frase por aresta)
+## 9. `src/main.py`
 
-| De | Para | Ligação |
-|----|------|---------|
-| Notebook / `update_db.py` | `quant.db` | Escrevem `prices_daily` e `macro_daily`. |
-| `quant.db` | `main.py` | Leitura só de leitura; saída é imagem. |
-| `quant.db` | `predict.py` | Leitura só de leitura; saída é texto no terminal. |
-| `main.py` | `predict.py` | Nenhuma dependência direta; modelos e alvos diferentes. |
-| `update_db.py` | `predict.py` | Atualiza colunas/series que `predict.py` espera no `SELECT`. |
+Carga via SQL + HMM global + gráfico. Independente do XGBoost.
 
 ---
 
-*Documento gerado para acompanhar a lógica do repositório; se alterar constantes (`MIN_HMM`, limiares de choque, lista `BASE`), atualize este ficheiro em conjunto.*
+## 10. `notebook.ipynb` / `scripts/update_db.py`
+
+Sem alteração de papel: ingestão IB/FRED, features em SQL/Python, escrita DuckDB.
+
+---
+
+## 11. Documentação
+
+| Ficheiro | Função |
+|----------|--------|
+| **`md/CLAUDE.md`** | Guia para agentes / devs: comandos, arquitetura, `merge_asof`, SHAP, logs. |
+| **`md/notes.md`** | Estado do projeto, limitações (incl. Optuna), próximos passos. |
+| **`md/results.md`** | Métricas de referência e linhas Optuna (sincronizar com `logs/`). |
+
+---
+
+## 12. Ordem sugerida no dia a dia
+
+1. Atualizar dados (notebook / `update_db.py`).
+2. `python scripts/predict.py` — métricas + SHAP + logs.
+3. Opcional: `python scripts/optimize.py` — hiperparâmetros.
+4. Opcional: `python scripts/backtest.py` — leitura económica minimalista.
+5. Opcional: `python src/main.py` — figura descritiva.
+
+---
+
+*Se alterar `RV_SHOCK_*`, `BASE`, `HMM_REFIT` default ou o objetivo do Optuna, atualize `md/results.md` e este resumo em conjunto.*
