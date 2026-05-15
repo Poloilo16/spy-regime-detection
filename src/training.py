@@ -21,7 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
 
-_ROOT = Path(__file__).resolve().parent
+_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = str(_ROOT / 'Data' / 'quant.db')
 
 LAGS = [1, 5]
