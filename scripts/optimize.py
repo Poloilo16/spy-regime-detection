@@ -5,9 +5,8 @@ Requires: pip install optuna
 """
 from __future__ import annotations
 
-import csv
 import json
-import os
+import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -15,22 +14,21 @@ from pathlib import Path
 warnings.filterwarnings('ignore')
 
 import optuna
-import sys
-from pathlib import Path
-_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(_ROOT / 'src'))
-import training 
 
+_PROJ = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJ / 'src'))
+
+import training
+from experiment_logging import append_metrics_row, save_params_json
 from training import (
     DEFAULT_DB_PATH,
     HMM_FEATURES,
     LAGS,
     RV_SHOCK_HIGH,
+    RV_SHOCK_LOW,
     build_xy,
     walk_forward_cv_metrics,
 )
-
-_ROOT = Path(__file__).resolve().parent
 N_TRIALS = 50
 CV_MAX_TRAIN = 756
 XGB_PARAMS_BASE = dict(
@@ -92,45 +90,41 @@ def main():
 
     log_id = f"OPTUNA_BEST_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    hmm_meta = f"{','.join(HMM_FEATURES)}|n_states={bp['N_HMM_STATES']}|HMM_REFIT={bp['HMM_REFIT']}"
 
-    log_row = [
-        log_id,
-        ts,
-        hmm_meta,
-        str(LAGS),
-        float(RV_SHOCK_HIGH),
-        'Rolling',
-        str(int(CV_MAX_TRAIN)),
-        float(rd['accuracy']),
-        float(rd[trn[1]]['recall']),
-        float(rd['weighted avg']['f1-score']),
-        json.dumps(study.best_params, sort_keys=True),
-    ]
-    header = [
-        'Experiment_ID',
-        'Timestamp',
-        'HMM_FEATURES',
-        'Lags',
-        'Alvo_Banda',
-        'CV_Janela',
-        'CV_max_train_size',
-        'Acurácia',
-        'Recall_Estável',
-        'F1_Weighted',
-        'Top_5_Features',
-    ]
+    append_metrics_row({
+        'Experiment_ID': log_id,
+        'Timestamp': ts,
+        'Source': 'optimize',
+        'Acurácia': float(rd['accuracy']),
+        'F1_Weighted': float(rd['weighted avg']['f1-score']),
+        'F1_Estável': float(rd[trn[1]]['f1-score']),
+        'Recall_Estável': float(rd[trn[1]]['recall']),
+        'Alvo_Banda': float(RV_SHOCK_HIGH),
+        'CV_Janela': 'Rolling',
+        'CV_max_train_size': int(CV_MAX_TRAIN),
+        'N_HMM_STATES': int(bp['N_HMM_STATES']),
+        'HMM_REFIT': int(bp['HMM_REFIT']),
+        'N_Samples': int(len(yb)),
+        'N_Features': int(Xb.shape[1]),
+        'Optuna_N_Trials': int(N_TRIALS),
+        'Optuna_Best_F1_Estável': float(study.best_value),
+    })
 
-    logs_dir = _ROOT / 'logs'
-    os.makedirs(logs_dir, exist_ok=True)
-    experiment_log_path = logs_dir / 'experiment_log.csv'
-    write_header = not experiment_log_path.exists()
-    with open(experiment_log_path, 'a', newline='', encoding='utf-8') as f:
-        w = csv.writer(f)
-        if write_header:
-            w.writerow(header)
-        w.writerow(log_row)
-    print(f"\nLinha Optuna gravada em: {experiment_log_path}")
+    save_params_json(log_id, {
+        'run': 'optuna_best_refit',
+        'hmm_features': list(HMM_FEATURES),
+        'lags': list(LAGS),
+        'rv_shock_low': float(RV_SHOCK_LOW),
+        'rv_shock_high': float(RV_SHOCK_HIGH),
+        'cv_max_train_size': int(CV_MAX_TRAIN),
+        'optuna_n_trials': int(N_TRIALS),
+        'optuna_best_value_f1_estável': float(study.best_value),
+        'optuna_best_params': study.best_params,
+        'xgb_classifier_params': xgb_best,
+        'classification_report': rd,
+    })
+    print(f"\nMétricas: {_PROJ / 'logs' / 'metrics_log.csv'}")
+    print(f"Parâmetros: {_PROJ / 'logs' / 'params' / (log_id + '_params.json')}")
 
 
 if __name__ == '__main__':
