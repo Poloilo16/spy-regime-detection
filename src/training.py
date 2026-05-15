@@ -21,9 +21,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
 
-# Repo root: …/spy-regime-detection (parent of `src/`, where `Data/quant.db` lives).
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH = str(_REPO_ROOT / 'Data' / 'quant.db')
+_ROOT = Path(__file__).resolve().parent
+DEFAULT_DB_PATH = str(_ROOT / 'Data' / 'quant.db')
 
 LAGS = [1, 5]
 BASE = [

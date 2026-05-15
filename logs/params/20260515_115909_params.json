@@ -1,0 +1,120 @@
+{
+  "cv_max_train_size": 756,
+  "feature_list": [
+    "log_return",
+    "rv_21d",
+    "vix",
+    "vrp",
+    "slope_2s10s",
+    "garch_var",
+    "amihud_liquidity",
+    "hy_oas",
+    "icsa",
+    "log_return_lag1",
+    "rv_21d_lag1",
+    "vix_lag1",
+    "vrp_lag1",
+    "slope_2s10s_lag1",
+    "garch_var_lag1",
+    "amihud_liquidity_lag1",
+    "hy_oas_lag1",
+    "icsa_lag1",
+    "log_return_lag5",
+    "rv_21d_lag5",
+    "vix_lag5",
+    "vrp_lag5",
+    "slope_2s10s_lag5",
+    "garch_var_lag5",
+    "amihud_liquidity_lag5",
+    "hy_oas_lag5",
+    "icsa_lag5",
+    "regime_lag1",
+    "p_hmm0_tmrw",
+    "p_hmm1_tmrw",
+    "p_hmm2_tmrw",
+    "p_hmm3_tmrw"
+  ],
+  "hmm_features": [
+    "log_return",
+    "vix"
+  ],
+  "hmm_refit": 21,
+  "lags": [
+    1,
+    5
+  ],
+  "latest_prediction": {
+    "date": "2026-04-24 00:00:00",
+    "pred_class": 0,
+    "proba": {
+      "Alta": 0.14516179263591766,
+      "Est\u00e1vel": 0.21099461615085602,
+      "Queda": 0.6438435912132263
+    }
+  },
+  "min_hmm": 756,
+  "n_hmm_states": 4,
+  "rv_shock_high": 0.075,
+  "shap_top_predicted_class": [
+    {
+      "feature": "vrp",
+      "shap": 0.2663186192512512
+    },
+    {
+      "feature": "log_return",
+      "shap": 0.23256441950798035
+    },
+    {
+      "feature": "amihud_liquidity",
+      "shap": 0.2275470793247223
+    },
+    {
+      "feature": "slope_2s10s",
+      "shap": 0.13406339287757874
+    },
+    {
+      "feature": "vix",
+      "shap": -0.10995858162641525
+    }
+  ],
+  "source": "predict",
+  "target_names": {
+    "0": "Queda",
+    "1": "Est\u00e1vel",
+    "2": "Alta"
+  },
+  "top_15_importances": {
+    "amihud_liquidity": 0.03279000148177147,
+    "amihud_liquidity_lag1": 0.03345699980854988,
+    "garch_var": 0.03462899848818779,
+    "garch_var_lag1": 0.040105000138282776,
+    "garch_var_lag5": 0.0311450008302927,
+    "icsa_lag5": 0.031982000917196274,
+    "log_return": 0.03743800148367882,
+    "log_return_lag1": 0.03716199845075607,
+    "p_hmm0_tmrw": 0.03182699903845787,
+    "p_hmm1_tmrw": 0.03190600126981735,
+    "p_hmm2_tmrw": 0.03194800019264221,
+    "slope_2s10s_lag5": 0.03375900164246559,
+    "vix": 0.033500999212265015,
+    "vrp": 0.03380899876356125,
+    "vrp_lag5": 0.03687499836087227
+  },
+  "top_5_features": [
+    "garch_var_lag1",
+    "log_return",
+    "log_return_lag1",
+    "vrp_lag5",
+    "garch_var"
+  ],
+  "xgb_classifier_params": {
+    "colsample_bytree": 0.8,
+    "eval_metric": "mlogloss",
+    "learning_rate": 0.05,
+    "max_depth": 4,
+    "n_estimators": 300,
+    "random_state": 42,
+    "subsample": 0.8,
+    "verbosity": 0
+  }
+}
